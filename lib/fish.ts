@@ -17,7 +17,7 @@ import { Rng } from "./prng";
 // all together. Set it to 0 to draw no outlines at all: the stroke calls are
 // skipped entirely, while the fish's shape and colors stay unchanged. Gill
 // lines and scale marks are intentionally not affected by this.
-const OUTLINE_WIDTH = 1;
+const OUTLINE_WIDTH = 0;
 
 // A minimal 2D context surface. Both the DOM canvas context and the OG image
 // runtime satisfy this, so the same drawing code can serve both.
