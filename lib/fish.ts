@@ -54,6 +54,60 @@ function wobblyEllipse(
   return pts;
 }
 
+// The body is picked from a set of archetypes rather than always being one
+// ellipse. Each is still crude and hand-drawn; the archetype only bends the
+// base profile before the usual scale, tilt, and edge jitter go on top.
+type BodyKind = "round" | "torpedo" | "disc" | "teardrop";
+
+// Local silhouette point for a body archetype at angle t, before tilt and edge
+// jitter. Local +x points toward the tail, -x toward the head; hw and hh are
+// the base half-width and half-height. Each archetype warps the base ellipse a
+// different way.
+function shapePoint(kind: BodyKind, t: number, hw: number, hh: number): [number, number] {
+  const ex = Math.cos(t) * hw;
+  let ey = Math.sin(t) * hh;
+  const nx = Math.cos(t); // -1 at the head, +1 at the tail
+  if (kind === "torpedo") {
+    // Pinch both ends toward blunt points so it reads as a long torpedo.
+    ey *= 1 - 0.42 * Math.pow(Math.abs(nx), 2.2);
+  } else if (kind === "teardrop") {
+    // Fat at the head, tapering to a narrow peduncle at the tail.
+    ey *= 0.5 + 0.5 * (0.5 - 0.5 * nx);
+  } else if (kind === "disc") {
+    // A rounder disc with a touch of belly fullness.
+    ey *= 1 + 0.05 * Math.sin(t);
+  }
+  // "round" is just the plain ellipse.
+  return [ex, ey];
+}
+
+// Build the wobbly body outline for a chosen archetype, using the same seeded
+// per-point edge jitter as everything else so it stays hand-drawn.
+function bodyPath(
+  kind: BodyKind,
+  cx: number,
+  cy: number,
+  hw: number,
+  hh: number,
+  tilt: number,
+  rng: Rng,
+  wobble: number,
+  steps = 56
+): Array<[number, number]> {
+  const cos = Math.cos(tilt);
+  const sin = Math.sin(tilt);
+  const pts: Array<[number, number]> = [];
+  for (let i = 0; i < steps; i++) {
+    const t = (i / steps) * Math.PI * 2;
+    const [sx, sy] = shapePoint(kind, t, hw, hh);
+    const wob = 1 + rng.jitter(wobble);
+    const ex = sx * wob;
+    const ey = sy * wob;
+    pts.push([cx + ex * cos - ey * sin, cy + ex * sin + ey * cos]);
+  }
+  return pts;
+}
+
 // Trace a point list as a smooth-ish closed curve using quadratic midpoints.
 function tracePath(ctx: Ctx, pts: Array<[number, number]>) {
   ctx.beginPath();
@@ -251,55 +305,93 @@ export function drawFish(ctx: Ctx, seed: number, S: number) {
   // Shrink the whole drawing slightly around the canvas center so the fish,
   // tail and fins included, always sits inside the box with a margin.
   ctx.save();
-  const fit = 0.8;
+  const fit = 0.78;
   ctx.translate(S / 2, S / 2);
   ctx.scale(fit, fit);
   ctx.translate(-S / 2, -S / 2);
 
   // Body geometry. Sat left of center so the tail has room on the right, with a
-  // little seeded drift and a slight tilt.
-  const cx = S * 0.46 + rng.jitter(S * 0.03);
+  // little seeded drift and a slight tilt. The seed first picks a body
+  // archetype, then hw/hh (base half-width and half-height) are sized to suit
+  // it: the torpedo is long and thin, the disc is taller than it is long, and
+  // so on.
+  const archetype = rng.pick(["round", "torpedo", "disc", "teardrop"] as const);
+  const cx = S * 0.44 + rng.jitter(S * 0.03);
   const cy = S * 0.5 + rng.jitter(S * 0.05);
-  const rx = S * rng.range(0.24, 0.3);
-  const ry = rx * rng.range(0.5, 0.72);
+
+  let hw: number;
+  let hh: number;
+  if (archetype === "round") {
+    hw = S * rng.range(0.22, 0.27);
+    hh = hw * rng.range(0.85, 1.0);
+  } else if (archetype === "torpedo") {
+    hw = S * rng.range(0.26, 0.31);
+    hh = hw * rng.range(0.32, 0.46);
+  } else if (archetype === "disc") {
+    hh = S * rng.range(0.23, 0.29);
+    hw = hh * rng.range(0.6, 0.82); // taller than long, like an angelfish
+  } else {
+    // teardrop
+    hw = S * rng.range(0.25, 0.3);
+    hh = hw * rng.range(0.55, 0.72);
+  }
+
   const tilt = rng.jitter(0.18); // a few degrees
   const wobble = rng.range(0.03, 0.08);
 
   const bodyHue = rng.range(0, 360);
   const finHue = (bodyHue + rng.range(120, 240)) % 360;
 
-  // Facing left like the references: eye and gills on the left, tail on right.
-  const rightEdge = cx + Math.cos(tilt) * rx;
-  const leftInner = cx - rx * 0.55;
+  // The wobbly outline for the chosen body.
+  const bodyPts = bodyPath(archetype, cx, cy, hw, hh, tilt, rng, wobble, 56);
+
+  // Attachment anchors read off the actual archetype silhouette (sampled
+  // without jitter for stable placement) so the eye, gills, fins, and tail hang
+  // off whichever body was chosen, not off a plain ellipse. Facing left: head
+  // and eye on the left, tail on the right.
+  const cos = Math.cos(tilt);
+  const sin = Math.sin(tilt);
+  const toWorld = (ex: number, ey: number): [number, number] => [
+    cx + ex * cos - ey * sin,
+    cy + ex * sin + ey * cos,
+  ];
+  const headTip = shapePoint(archetype, Math.PI, hw, hh); // leftmost
+  const tailTip = shapePoint(archetype, 0, hw, hh); // rightmost
+  const topReach = Math.abs(shapePoint(archetype, -Math.PI / 2, hw, hh)[1]);
+  const botReach = Math.abs(shapePoint(archetype, Math.PI / 2, hw, hh)[1]);
 
   // --- Back-to-front layering ---
 
-  // Tail, behind the body on the right.
-  drawTail(ctx, rng, rightEdge - rx * 0.05, cy, ry * rng.range(1.1, 1.6), bodyHue);
+  // Tail, behind the body, hung off the rear of the actual body.
+  const tailH = Math.max(hh * 0.8, S * 0.1);
+  const tailAnchor = toWorld(tailTip[0] * 0.98, 0);
+  drawTail(ctx, rng, tailAnchor[0] - hw * 0.04, tailAnchor[1], tailH * rng.range(1.0, 1.4), bodyHue);
 
-  // Dorsal fin peeking above the body.
+  // Dorsal fin peeking above the body's top edge.
+  const dorsal = toWorld(rng.jitter(hw * 0.3), -topReach * rng.range(0.9, 1.1));
   drawFin(
     ctx,
     rng,
-    cx + rng.jitter(rx * 0.3),
-    cy - ry * rng.range(0.85, 1.05),
-    rx * rng.range(0.28, 0.45),
-    ry * rng.range(0.3, 0.5),
+    dorsal[0],
+    dorsal[1],
+    hw * rng.range(0.28, 0.45),
+    topReach * rng.range(0.5, 0.9),
     rng.jitter(0.5),
     finHue,
     { gradient: rng.bool(0.6) }
   );
 
-  // Ventral fin(s) peeking below the body.
+  // Ventral fin(s) peeking below the body's bottom edge.
   const ventralCount = rng.int(1, 2);
   for (let i = 0; i < ventralCount; i++) {
+    const v = toWorld(-hw * 0.2 + i * hw * rng.range(0.4, 0.6), botReach * rng.range(0.9, 1.1));
     drawFin(
       ctx,
       rng,
-      cx - rx * 0.2 + i * rx * rng.range(0.4, 0.6),
-      cy + ry * rng.range(0.85, 1.05),
-      rx * rng.range(0.16, 0.28),
-      ry * rng.range(0.22, 0.36),
+      v[0],
+      v[1],
+      hw * rng.range(0.16, 0.28),
+      botReach * rng.range(0.35, 0.6),
       rng.jitter(0.5),
       finHue,
       { gradient: rng.bool(0.4), dashed: rng.bool(0.2) }
@@ -307,25 +399,24 @@ export function drawFish(ctx: Ctx, seed: number, S: number) {
   }
 
   // Body: gradient fill (radial or two-stop linear) plus wobbly black outline.
-  const bodyPts = wobblyEllipse(cx, cy, rx, ry, tilt, rng, wobble, 48);
   ctx.save();
   const bodyAlpha = rng.range(0.85, 1);
   const bodyL = rng.range(40, 58);
   const bodyS = rng.range(65, 92);
   if (rng.bool(0.6)) {
     const rg = ctx.createRadialGradient(
-      cx - rx * 0.2,
-      cy - ry * 0.2,
-      rx * 0.1,
+      cx - hw * 0.2,
+      cy - hh * 0.2,
+      hw * 0.1,
       cx,
       cy,
-      rx
+      Math.max(hw, hh)
     );
     rg.addColorStop(0, hsla({ h: bodyHue, s: bodyS, l: bodyL + rng.range(12, 24), a: bodyAlpha }));
     rg.addColorStop(1, hsla({ h: bodyHue, s: bodyS, l: bodyL, a: bodyAlpha }));
     ctx.fillStyle = rg;
   } else {
-    const lg = ctx.createLinearGradient(cx - rx, cy - ry, cx + rx, cy + ry);
+    const lg = ctx.createLinearGradient(cx - hw, cy - hh, cx + hw, cy + hh);
     lg.addColorStop(0, hsla({ h: bodyHue, s: bodyS, l: bodyL + rng.range(8, 20), a: bodyAlpha }));
     lg.addColorStop(1, hsla({ h: (bodyHue + rng.jitter(20)) % 360, s: bodyS, l: bodyL, a: bodyAlpha }));
     ctx.fillStyle = lg;
@@ -334,8 +425,9 @@ export function drawFish(ctx: Ctx, seed: number, S: number) {
   ctx.fill();
   ctx.restore();
 
-  // Scales over part of the body.
-  drawScales(ctx, rng, bodyPts, cx, cy, rx, ry, bodyHue);
+  // Scales over part of the body. drawScales clips to bodyPts, so they conform
+  // to whichever archetype was drawn.
+  drawScales(ctx, rng, bodyPts, cx, cy, hw, hh, bodyHue);
 
   // Body outline drawn after scales so it stays crisp on top. The body reads a
   // touch heavier than the fins, kept as a small seeded multiplier of
@@ -343,25 +435,31 @@ export function drawFish(ctx: Ctx, seed: number, S: number) {
   inkOutline(ctx, bodyPts, rng, rng.range(1.05, 1.45));
 
   // Pectoral fin on the mid body, a contrasting leaf/ellipse.
+  const pec = toWorld(hw * rng.range(0.05, 0.3), botReach * rng.range(0.0, 0.35));
   drawFin(
     ctx,
     rng,
-    cx + rx * rng.range(0.05, 0.3),
-    cy + ry * rng.range(0.0, 0.35),
-    rx * rng.range(0.3, 0.5),
-    ry * rng.range(0.35, 0.6),
+    pec[0],
+    pec[1],
+    hw * rng.range(0.3, 0.5),
+    hh * rng.range(0.35, 0.6),
     rng.range(-0.35, 0.15),
     (finHue + rng.range(0, 60)) % 360,
     { gradient: rng.bool(0.7), dashed: rng.bool(0.25) }
   );
 
-  // Gills behind the eye.
-  const eyeX = leftInner + rng.jitter(rx * 0.05);
-  const eyeY = cy - ry * rng.range(0.1, 0.35);
-  drawGills(ctx, rng, eyeX + rx * 0.22, cy - ry * 0.05, ry * rng.range(0.7, 1.0));
+  // Eye near the head, keyed off the head end of the chosen body.
+  const eyeLocalX = headTip[0] * 0.62;
+  const eye = toWorld(eyeLocalX, -topReach * rng.range(0.12, 0.4));
+  const eyeX = eye[0];
+  const eyeY = eye[1];
+
+  // Gills just behind the eye.
+  const gill = toWorld(eyeLocalX + hw * 0.22, -hh * 0.05);
+  drawGills(ctx, rng, gill[0], gill[1], hh * rng.range(0.7, 1.0));
 
   // Eye: white circle with an off-center black pupil.
-  const eyeR = ry * rng.range(0.16, 0.24);
+  const eyeR = Math.max(hh * rng.range(0.16, 0.24), S * 0.018);
   ctx.save();
   ctx.fillStyle = "white";
   ctx.strokeStyle = "rgba(0,0,0,0.85)";
