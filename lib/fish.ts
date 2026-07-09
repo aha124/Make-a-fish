@@ -11,6 +11,14 @@
 
 import { Rng } from "./prng";
 
+// Base thickness, in px, for the black body / fin / tail outlines (the thick
+// hand-drawn edge). Every one of those outline stroke widths is this value
+// times a small per-part and seeded multiplier, so this single knob scales them
+// all together. Set it to 0 to draw no outlines at all: the stroke calls are
+// skipped entirely, while the fish's shape and colors stay unchanged. Gill
+// lines and scale marks are intentionally not affected by this.
+const OUTLINE_WIDTH = 1;
+
 // A minimal 2D context surface. Both the DOM canvas context and the OG image
 // runtime satisfy this, so the same drawing code can serve both.
 type Ctx = CanvasRenderingContext2D;
@@ -66,17 +74,23 @@ function tracePath(ctx: Ctx, pts: Array<[number, number]>) {
 }
 
 // Stroke a path as a wobbly black hand-drawn outline. Line width jitters a
-// little along the way by overdrawing a couple of passes.
-function inkOutline(ctx: Ctx, pts: Array<[number, number]>, rng: Rng, baseWidth: number) {
+// little along the way by overdrawing a couple of passes. `weight` is a small
+// per-part multiplier of OUTLINE_WIDTH, not a pixel amount. When OUTLINE_WIDTH
+// is 0 the stroke calls are skipped so nothing draws, but the seeded values are
+// still consumed so the rest of the fish is unaffected.
+function inkOutline(ctx: Ctx, pts: Array<[number, number]>, rng: Rng, weight: number) {
   ctx.save();
   ctx.strokeStyle = "rgba(0,0,0,0.92)";
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
   const passes = 2;
   for (let p = 0; p < passes; p++) {
-    ctx.lineWidth = baseWidth * (0.75 + rng.float() * 0.6);
-    tracePath(ctx, pts);
-    ctx.stroke();
+    // Seeded per-pass variation kept as a small multiplier of OUTLINE_WIDTH.
+    ctx.lineWidth = OUTLINE_WIDTH * weight * (0.75 + rng.float() * 0.6);
+    if (OUTLINE_WIDTH > 0) {
+      tracePath(ctx, pts);
+      ctx.stroke();
+    }
   }
   ctx.restore();
 }
@@ -108,7 +122,7 @@ function drawTail(ctx: Ctx, rng: Rng, x: number, y: number, size: number, bodyHu
     for (const poly of [top, bot]) {
       tracePath(ctx, poly);
       ctx.fill();
-      inkOutline(ctx, poly, rng, 2.5);
+      inkOutline(ctx, poly, rng, 1.0);
     }
   } else {
     const topS = kind === "triangle" ? spread : spread * rng.range(0.9, 1.2);
@@ -121,7 +135,7 @@ function drawTail(ctx: Ctx, rng: Rng, x: number, y: number, size: number, bodyHu
     }
     tracePath(ctx, poly);
     ctx.fill();
-    inkOutline(ctx, poly, rng, 2.5);
+    inkOutline(ctx, poly, rng, 1.0);
   }
   ctx.restore();
 }
@@ -153,14 +167,18 @@ function drawFin(
   ctx.fill();
 
   if (opts.dashed) {
-    ctx.setLineDash([6, 5]);
-    ctx.strokeStyle = "rgba(0,0,0,0.75)";
-    ctx.lineWidth = 2;
-    tracePath(ctx, pts);
-    ctx.stroke();
-    ctx.setLineDash([]);
+    // Dashed fin edge is a black outline too, so route it through OUTLINE_WIDTH
+    // and skip it entirely when outlines are off.
+    if (OUTLINE_WIDTH > 0) {
+      ctx.setLineDash([6, 5]);
+      ctx.strokeStyle = "rgba(0,0,0,0.75)";
+      ctx.lineWidth = OUTLINE_WIDTH * 0.9;
+      tracePath(ctx, pts);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
   } else {
-    inkOutline(ctx, pts, rng, 2.2);
+    inkOutline(ctx, pts, rng, 0.9);
   }
   ctx.restore();
 }
@@ -319,8 +337,10 @@ export function drawFish(ctx: Ctx, seed: number, S: number) {
   // Scales over part of the body.
   drawScales(ctx, rng, bodyPts, cx, cy, rx, ry, bodyHue);
 
-  // Body outline drawn after scales so it stays crisp on top.
-  inkOutline(ctx, bodyPts, rng, rng.range(2.6, 3.6));
+  // Body outline drawn after scales so it stays crisp on top. The body reads a
+  // touch heavier than the fins, kept as a small seeded multiplier of
+  // OUTLINE_WIDTH.
+  inkOutline(ctx, bodyPts, rng, rng.range(1.05, 1.45));
 
   // Pectoral fin on the mid body, a contrasting leaf/ellipse.
   drawFin(
