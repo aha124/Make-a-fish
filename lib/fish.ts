@@ -19,9 +19,57 @@ import { Rng } from "./prng";
 // lines and scale marks are intentionally not affected by this.
 const OUTLINE_WIDTH = 0;
 
-// A minimal 2D context surface. Both the DOM canvas context and the OG image
-// runtime satisfy this, so the same drawing code can serve both.
-type Ctx = CanvasRenderingContext2D;
+// A plain 2D canvas context: the minimal drawing surface `drawFish` needs.
+// `drawFish` depends only on this and a size; it never touches `window`,
+// `document`, or any browser-only global, so the identical drawing code runs in
+// the browser and on the server. The browser passes a real
+// `CanvasRenderingContext2D`; the server passes `@napi-rs/canvas`'s
+// `SKRSContext2D`. Both structurally satisfy this type, so a seed produces the
+// same fish in both places. Kept as a hand-written structural type (rather than
+// `CanvasRenderingContext2D`) so neither the DOM lib nor the native canvas types
+// have to be a perfect superset of the other.
+interface CanvasGradientLike {
+  addColorStop(offset: number, color: string): void;
+}
+type Ctx = {
+  save(): void;
+  restore(): void;
+  clearRect(x: number, y: number, w: number, h: number): void;
+  translate(x: number, y: number): void;
+  scale(x: number, y: number): void;
+  beginPath(): void;
+  closePath(): void;
+  moveTo(x: number, y: number): void;
+  quadraticCurveTo(cpx: number, cpy: number, x: number, y: number): void;
+  arc(
+    x: number,
+    y: number,
+    radius: number,
+    startAngle: number,
+    endAngle: number,
+    counterclockwise?: boolean
+  ): void;
+  fill(): void;
+  stroke(): void;
+  clip(): void;
+  setLineDash(segments: number[]): void;
+  createLinearGradient(x0: number, y0: number, x1: number, y1: number): CanvasGradientLike;
+  createRadialGradient(
+    x0: number,
+    y0: number,
+    r0: number,
+    x1: number,
+    y1: number,
+    r1: number
+  ): CanvasGradientLike;
+  // Styles accept a string or a gradient; typed loosely so both the DOM context
+  // (which also allows CanvasPattern) and the native context assign cleanly.
+  fillStyle: unknown;
+  strokeStyle: unknown;
+  lineWidth: number;
+  lineJoin: string;
+  lineCap: string;
+};
 
 type HSLA = { h: number; s: number; l: number; a?: number };
 
