@@ -109,3 +109,58 @@ body {
 .make-your-own a {
   color: #ffffff;
 }
+
+/* Mobile and short viewports: fit the entire thing on one screen with no
+   scroll, in both the open state (box + caption + buttons + countdown) and the
+   closed state (box + caption + "come back at 11:11").
+
+   We size the column to the *small* viewport height (svh), which excludes the
+   mobile browser's collapsible toolbars, so the layout never hides content
+   behind them. The drawing box stays square (aspect-ratio) but is capped so it
+   can shrink to leave room for everything below it. Desktop is unaffected: it
+   keeps min-height:100vh and the up-to-900px box from the rules above. */
+@media (max-width: 768px), (max-height: 520px) {
+  .field {
+    /* Lock to the usable viewport instead of growing past the fold. */
+    min-height: 0;
+    height: 100svh;
+    padding: 8px;
+    justify-content: center;
+  }
+
+  /* Square, but never taller than the space left after the caption and the
+     buttons/countdown (or the closed message). The reserve is a small,
+     verified upper bound on that non-box content plus padding. */
+  .box {
+    width: min(100%, calc(100svh - 132px));
+  }
+
+  .caption {
+    font-size: 22px;
+    margin-top: 6px;
+  }
+
+  .controls {
+    margin-top: 10px;
+    gap: 12px;
+  }
+
+  .controls button,
+  .controls a {
+    font-size: 16px;
+    padding: 5px 12px;
+  }
+
+  .countdown {
+    margin-top: 6px;
+  }
+
+  .closed-message {
+    font-size: 20px;
+    margin-top: 12px;
+  }
+
+  .make-your-own {
+    margin-top: 10px;
+  }
+}

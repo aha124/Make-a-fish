@@ -84,14 +84,19 @@ export default function HomeClient({ open: serverOpen, serverNow, windowEnd }: P
   }
 
   return (
-    <>
-      <FishFrame>{seed != null ? <FishCanvas seed={seed} /> : null}</FishFrame>
-      <div className="controls">
-        <button onClick={makeAnother}>make another</button>
-        <button onClick={share}>{copied ? "copied!" : "share"}</button>
-      </div>
-      <p className="countdown">{formatCountdown(remaining)}</p>
-    </>
+    <FishFrame
+      footer={
+        <>
+          <div className="controls">
+            <button onClick={makeAnother}>make another</button>
+            <button onClick={share}>{copied ? "copied!" : "share"}</button>
+          </div>
+          <p className="countdown">{formatCountdown(remaining)}</p>
+        </>
+      }
+    >
+      {seed != null ? <FishCanvas seed={seed} /> : null}
+    </FishFrame>
   );
 }
 
