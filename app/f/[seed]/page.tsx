@@ -20,13 +20,14 @@ export default function SharedFishPage({ params }: { params: { seed: string } })
   if (seed == null) notFound();
 
   return (
-    <>
-      <FishFrame>
-        <FishCanvas seed={seed} />
-      </FishFrame>
-      <p className="make-your-own">
-        <a href="/">make your own at 11:11</a>
-      </p>
-    </>
+    <FishFrame
+      footer={
+        <p className="make-your-own">
+          <a href="/">make your own at 11:11</a>
+        </p>
+      }
+    >
+      <FishCanvas seed={seed} />
+    </FishFrame>
   );
 }
